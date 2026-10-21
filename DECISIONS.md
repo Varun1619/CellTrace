@@ -139,7 +139,118 @@ first full run the statistics needed one window and the pipeline added about 97 
 ### Known tradeoff: a 5-window baseline is short
 With about 250 cells per window, estimating the center from 5 windows leaves it uncertain
 by about 0.45 sigma of the window mean. The side-of-center rules (WE3, WE4) are sensitive to
-that, which is the likely reason the false alarm rate is above the roughly 1.4% per point
-that the four rules give with exact limits. Textbook Phase I uses 20 to 25 subgroups. That
+that, which is the likely reason the false alarm rate is above the roughly 1.1% per point
+(an in-control average run length of about 92) that the four rules give with exact limits. Textbook Phase I uses 20 to 25 subgroups. That
 would mean a 20-minute warm-up before any fault, so the demo keeps 5 and
 `SPC_BASELINE_WINDOWS` makes it a one-line change.
+
+## Phase 5: genealogy and recall
+
+### SCD Type 2 keyed on (cell_id, valid_from)
+A rework closes the current version (`valid_to` = rework time, `is_current` false) and opens
+a new one. Each cell always has exactly one current row, and its full module history
+survives, so a recall can say "this cell was in M1, then reworked into M2".
+
+### Pack assignment is a Type 1 fill, not a new version
+Modules get their pack after their cells are placed. When `MODULE_TO_PACK` arrives, the open
+versions of that module's cells get `pack_id` filled in place. The cell did not move; the
+pack just became known. Making it a new version would double the table and make every cell
+look reworked.
+
+### Events apply in Kafka order
+The generator keys assembly events by line, so a line's events share one partition and
+`(partition, offset)` is their true order. Event timestamps can tie at millisecond
+resolution, which would make "rework then place" ambiguous.
+
+### Pure rules, one MERGE per batch
+`streaming/genealogy_rules.py` applies a batch of events to the current rows they touch and
+returns every changed version. `genealogy.py` reads only the current rows for the batch's
+cells and modules, then does one Delta MERGE on the SCD2 key. Replaying a batch is a no-op
+because a placement into the module a cell is already in is skipped.
+
+### Recall runs on DuckDB, not Spark
+`scripts/recall_lookup.py` is one SQL query over `silver.cell_tests` and
+`silver.cell_genealogy` through the DuckDB delta extension. No JVM start, so a lookup takes
+milliseconds. It reports cells that failed at test (never assembled) and cells that passed
+but are not yet in a module, because a recall that only lists packs hides the cells still
+on the floor.
+
+## Phase 6: dbt
+
+### Marts are Parquet files, not DuckDB tables
+dbt-duckdb's external materialization writes each mart to `lakehouse/gold/dbt/*.parquet`.
+The dashboard reads those files directly, so it never contends with `dbt build` for the
+DuckDB file lock. Airflow also keeps its own DuckDB file for the same reason.
+
+### Failure causes come from the shared spec seed
+`stg_cell_failures` unpivots the readings and joins `spec_limits`, one row per violated
+spec. The Pareto counts causes, not cells, and its docs say so.
+
+### Lot outliers need statistical and practical significance
+`fct_lot_quality` compares each lot to the median lot. z uses the lot's own standard error
+and effect size is the shift in within-lot standard deviations. A lot is flagged only when
+|z| > 4 and the effect is at least 0.5 SD. On the first run the bad lot scored z = -168 and
+effect -2.4 SD. Lot 8 had an IR z of 4.4 because it was tested while L2-S3 was drifting, but
+its effect was well under 0.5 SD, and correctly it was not flagged: that is a station
+problem, and SPC already caught it.
+
+### Singular tests encode the business rules
+`assert_injected_bad_lot_is_flagged` and `assert_no_normal_lot_is_flagged` fail the build if
+the outlier thresholds stop separating the injected lot from normal ones.
+
+## Phase 7: Airflow
+
+### Airflow 2.10, not 3.x
+The DAG needs task SLAs and `sla_miss_callback`, which Airflow 3.0 removed.
+
+### dbt and delta-rs in their own virtualenv
+dbt-core pins protobuf, Jinja and others that collide with Airflow's constraints. The image
+installs them into `/opt/airflow/celltrace-venv` and tasks call that interpreter through
+`BashOperator`.
+
+### Maintenance with delta-rs instead of Spark
+OPTIMIZE and VACUUM run through the `deltalake` Python package, so the Airflow image needs no
+Java. Compaction commits with `dataChange=false`, which the Spark streams reading silver
+ignore, and a commit conflict with a streaming append is retried. VACUUM keeps 7 days and
+refuses less.
+
+### One UID for every writer
+The app and Airflow images both run as UID 50000, so Spark, dbt and the maintenance tasks can
+all write the shared lakehouse volume.
+
+### Daily report upserts by date
+`publish_daily_report` MERGEs on `test_date`, so a retry or a backfill replaces a day's row.
+
+### Verified on the first full run
+Both DAG runs (the manual trigger and the scheduled run created on unpause) finished with all
+three tasks green in about 30 seconds. OPTIMIZE compacted `silver.cell_tests` from 408 files
+to 1 and `silver.assembly_events` from 416 to 1. VACUUM removed nothing, as expected with
+7-day retention. The bad-lot recall went from 670 ms before compaction to 340 ms after (one
+measurement each), because DuckDB no longer opens hundreds of small Parquet files.
+
+### DAG tests use a throwaway SQLite database
+`DagBag` needs a metadata database. `make test-airflow` and CI migrate a temporary SQLite
+database instead of depending on the Postgres service.
+
+## Phase 8: dashboard
+
+### Queries, charts and layout are separate
+`queries.py` returns DataFrames, `charts.py` turns DataFrames into Plotly figures, and
+`app.py` only lays them out. Both of the first two are tested without a browser.
+
+### The Live SPC tab is a fragment
+`st.fragment(run_every=10)` reruns only the control chart and its alert table, not the whole
+page. Queries are cached for 10 seconds so several viewers do not multiply the load.
+
+### Chart rules
+Colors come from a validated dark palette (three categorical slots that pass the all-pairs
+colorblind checks). Control limits are muted reference lines, alerts use a reserved red with
+an X marker and the rule name, and the Pareto is a single-axis ranked bar chart with the
+cumulative share in the hover instead of the classic dual-axis Pareto.
+
+## Phase 9: CI and seeding
+
+### A seeder built from the pure cores
+`scripts/seed_lakehouse.py` runs the simulator, the silver rules, the genealogy rules and
+the SPC engine in-process and writes every table with delta-rs. CI uses it to give
+`dbt build` real data without Kafka or Spark. Seeded alerts have no pipeline latency.

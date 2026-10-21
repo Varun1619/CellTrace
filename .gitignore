@@ -23,3 +23,6 @@ airflow/plugins/
 spark-warehouse/
 metastore_db/
 derby.log
+
+# dbt anonymous telemetry id
+dbt/.user.yml
