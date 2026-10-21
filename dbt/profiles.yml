@@ -1,0 +1,10 @@
+celltrace:
+  target: dev
+  outputs:
+    dev:
+      type: duckdb
+      path: "{{ env_var('DBT_DUCKDB_PATH', 'target/celltrace.duckdb') }}"
+      extensions:
+        - delta
+      external_root: "{{ env_var('LAKEHOUSE_ROOT', '../lakehouse') }}/gold/dbt"
+      threads: 4

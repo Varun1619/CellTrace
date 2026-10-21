@@ -6,7 +6,7 @@ RUN = $(COMPOSE) run --rm
 PY = python
 ARGS ?=
 
-.PHONY: env build up down reset generate stream pipeline dbt dashboard test test-local inspect recall logs
+.PHONY: env build up down reset airflow airflow-trigger test-airflow generate stream pipeline dbt dashboard test test-local inspect recall logs
 
 env:
 	@$(PY) -c "import os, shutil; os.path.exists('.env') or shutil.copy('.env.example', '.env')"
@@ -36,7 +36,8 @@ pipeline: up
 	$(COMPOSE) up -d generator streaming
 
 dbt: env
-	$(RUN) app sh -c "cd dbt && dbt build --profiles-dir . && dbt docs generate --profiles-dir ."
+	$(RUN) app python -m scripts.run_dbt build $(ARGS)
+	$(RUN) app python -m scripts.run_dbt docs generate
 
 dashboard: env
 	$(COMPOSE) up -d dashboard
@@ -56,3 +57,14 @@ recall: env
 
 logs:
 	$(COMPOSE) logs -f --tail 100 $(ARGS)
+
+airflow: env
+	$(COMPOSE) --profile airflow up -d --wait airflow-webserver airflow-scheduler
+	@echo Airflow at http://localhost:8081
+
+airflow-trigger:
+	$(COMPOSE) --profile airflow exec airflow-scheduler airflow dags unpause celltrace_daily
+	$(COMPOSE) --profile airflow exec airflow-scheduler airflow dags trigger celltrace_daily
+
+test-airflow: env
+	$(COMPOSE) --profile airflow run --rm --no-deps -e PYTHONPATH=/opt/celltrace/airflow/dags -e AIRFLOW__DATABASE__SQL_ALCHEMY_CONN=sqlite:////tmp/airflow-test.db airflow-scheduler bash -c "airflow db migrate > /dev/null && cd /opt/celltrace && python -m pytest -q -p no:cacheprovider tests/airflow"

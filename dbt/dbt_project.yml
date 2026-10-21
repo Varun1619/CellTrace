@@ -1,0 +1,34 @@
+name: celltrace
+version: "1.0.0"
+config-version: 2
+profile: celltrace
+
+model-paths: ["models"]
+seed-paths: ["seeds"]
+test-paths: ["tests"]
+target-path: target
+clean-targets: ["target", "dbt_packages"]
+
+vars:
+  # A lot is an outlier when its mean is both statistically and practically far from the
+  # median lot: |z| above lot_outlier_z (z uses the lot's own standard error) and a shift of
+  # at least lot_outlier_min_effect_sd within-lot standard deviations.
+  lot_outlier_z: 4
+  lot_outlier_min_effect_sd: 0.5
+
+seeds:
+  celltrace:
+    spec_limits:
+      +column_types:
+        metric: varchar
+        lower_limit: double
+        upper_limit: double
+        failure_code: varchar
+
+models:
+  celltrace:
+    staging:
+      +materialized: view
+    marts:
+      # Parquet files beside the lakehouse, so the dashboard reads them without locking the DuckDB file.
+      +materialized: external

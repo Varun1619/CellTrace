@@ -1,0 +1,12 @@
+version: 2
+
+seeds:
+  - name: spec_limits
+    description: >
+      End-of-line spec limits. The generator reads this same file to decide PASS/FAIL, so the
+      dbt failure causes and the station verdicts always agree.
+    columns:
+      - name: metric
+        tests: [not_null, unique]
+      - name: failure_code
+        tests: [not_null, unique]

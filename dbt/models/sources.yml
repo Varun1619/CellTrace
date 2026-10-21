@@ -1,0 +1,41 @@
+version: 2
+
+sources:
+  - name: silver
+    description: Cleaned, deduplicated Delta tables written by the Spark streams.
+    meta:
+      external_location: "delta_scan('{{ env_var('LAKEHOUSE_ROOT', '../lakehouse') }}/silver/{name}')"
+    tables:
+      - name: cell_tests
+        description: One row per end-of-line test that passed schema and range checks, deduplicated on event_id.
+        columns:
+          - name: event_id
+            tests: [not_null, unique]
+          - name: cell_id
+            tests: [not_null]
+          - name: result
+            tests:
+              - accepted_values:
+                  values: ["PASS", "FAIL"]
+      - name: cell_tests_quarantine
+        description: Rows rejected by silver, with every reason that applied.
+      - name: assembly_events
+        description: Cell-to-module, module-to-pack and rework events.
+      - name: cell_genealogy
+        description: SCD Type 2 placement of each cell in a module and pack.
+      - name: module_pack
+        description: Which pack each module went into.
+      - name: fault_log
+        description: Faults the generator injected, with their start time.
+      - name: dq_batch_metrics
+        description: Per-micro-batch data quality results from the silver sinks.
+
+  - name: gold
+    description: Gold Delta tables written by the SPC stream.
+    meta:
+      external_location: "delta_scan('{{ env_var('LAKEHOUSE_ROOT', '../lakehouse') }}/gold/{name}')"
+    tables:
+      - name: spc_alerts
+        description: Western Electric rule violations per station, metric and 1-minute window.
+      - name: spc_window_stats
+        description: Every closed SPC window with its z-score against the control limits.

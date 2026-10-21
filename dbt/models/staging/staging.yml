@@ -1,0 +1,37 @@
+version: 2
+
+models:
+  - name: stg_cell_tests
+    description: Cleaned end-of-line tests with the test date and a first-test flag per cell.
+    columns:
+      - name: event_id
+        tests: [not_null, unique]
+      - name: cell_id
+        tests: [not_null]
+      - name: result
+        tests:
+          - accepted_values:
+              values: ["PASS", "FAIL"]
+      - name: shift
+        tests:
+          - accepted_values:
+              values: ["A", "B", "C"]
+      - name: is_first_test
+        description: True for the earliest test of each cell; first-pass yield counts only these.
+
+  - name: stg_cell_failures
+    description: One row per violated spec limit, joined from the spec_limits seed.
+    columns:
+      - name: failure_key
+        tests: [not_null, unique]
+      - name: event_id
+        tests:
+          - relationships:
+              to: ref('stg_cell_tests')
+              field: event_id
+      - name: failure_code
+        tests:
+          - not_null
+          - relationships:
+              to: ref('spec_limits')
+              field: failure_code

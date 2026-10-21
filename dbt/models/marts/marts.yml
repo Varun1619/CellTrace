@@ -1,0 +1,90 @@
+version: 2
+
+models:
+  - name: fct_first_pass_yield
+    description: >
+      First-pass yield (FPY) by day, line, station and shift. FPY is the share of cells that
+      passed on their first end-of-line test.
+    columns:
+      - name: fpy_key
+        tests: [not_null, unique]
+      - name: station_id
+        tests:
+          - not_null
+          - relationships:
+              to: ref('dim_station')
+              field: station_id
+      - name: shift
+        tests:
+          - accepted_values:
+              values: ["A", "B", "C"]
+      - name: first_pass_yield
+        tests:
+          - value_between:
+              min_value: 0
+              max_value: 1
+
+  - name: fct_defect_pareto
+    description: >
+      Failure causes per day ranked by count. A cell that breaks two specs counts once for
+      each cause, so shares describe causes, not cells.
+    columns:
+      - name: pareto_key
+        tests: [not_null, unique]
+      - name: failure_code
+        tests:
+          - not_null
+          - relationships:
+              to: ref('spec_limits')
+              field: failure_code
+      - name: pareto_rank
+        tests: [not_null]
+      - name: cumulative_share
+        tests:
+          - value_between:
+              min_value: 0
+              max_value: 1.000001
+
+  - name: fct_lot_quality
+    description: >
+      Capacity and internal resistance statistics per lot. is_outlier needs both a large
+      z-score against the median lot (var lot_outlier_z) and a practically large shift in
+      within-lot standard deviations (var lot_outlier_min_effect_sd).
+    columns:
+      - name: lot_id
+        tests:
+          - not_null
+          - unique
+          - relationships:
+              to: ref('dim_lot')
+              field: lot_id
+      - name: n_cells
+        tests: [not_null]
+      - name: is_outlier
+        tests: [not_null]
+      - name: outlier_metric
+        tests:
+          - accepted_values:
+              values: ["CAPACITY", "IR", "CAPACITY_AND_IR"]
+
+  - name: dim_station
+    description: Test stations seen in the data.
+    columns:
+      - name: station_id
+        tests: [not_null, unique]
+      - name: line_id
+        tests: [not_null]
+
+  - name: dim_lot
+    description: Cell lots, with the lot the generator deliberately degraded marked.
+    columns:
+      - name: lot_id
+        tests: [not_null, unique]
+      - name: is_injected_bad_lot
+        tests: [not_null]
+
+  - name: rpt_daily_quality
+    description: Daily summary that the Airflow DAG publishes to gold.daily_quality_report.
+    columns:
+      - name: test_date
+        tests: [not_null, unique]
