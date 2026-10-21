@@ -1,0 +1,5 @@
+metric,lower_limit,upper_limit,failure_code
+voltage_v,3.625,3.675,VOLTAGE_OUT_OF_SPEC
+internal_resistance_mohm,,1.32,IR_HIGH
+capacity_ah,4.88,,CAPACITY_LOW
+temp_c,,27.5,TEMP_HIGH
