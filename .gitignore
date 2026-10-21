@@ -1,0 +1,25 @@
+.env
+__pycache__/
+*.pyc
+.pytest_cache/
+.venv/
+.ipynb_checkpoints/
+
+# lakehouse data and checkpoints are generated at runtime
+lakehouse/*
+!lakehouse/.gitkeep
+
+# dbt
+dbt/target/
+dbt/dbt_packages/
+dbt/logs/
+*.duckdb
+*.duckdb.wal
+
+# airflow runtime
+airflow/logs/
+airflow/plugins/
+
+spark-warehouse/
+metastore_db/
+derby.log
