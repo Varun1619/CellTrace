@@ -293,3 +293,15 @@ once.
 WE3 and WE4 keep firing on every window while a series stays off-center, so one condition
 can produce six alerts. The README reports unexplained alerts as episodes (consecutive
 alerting windows on one series) alongside the raw per-window count.
+
+## CI: an intermittent dbt crash
+
+The first CI run aborted in `dbt build` with `Fatal Python error: PyEval_SaveThread: the
+function must be called with the GIL held` (exit 134). The stack trace pointed into
+dbt-duckdb's connection cleanup: with a file database and the default settings, it closes the
+shared DuckDB connection whenever its open-handle count reaches zero and reopens it for the
+next node. With several threads that close can race a query still inside DuckDB's native code.
+
+Reproduced locally: 3 crashes in 25 runs of `dbt test --threads 8`. With `keep_open: true` in
+`dbt/profiles.yml` (one connection for the whole run): 0 crashes in 50 runs, and `dbt build`
+and `dbt docs generate` still pass. The green CI run on the next commit had been luck.

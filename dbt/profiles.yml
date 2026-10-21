@@ -8,3 +8,8 @@ celltrace:
         - delta
       external_root: "{{ env_var('LAKEHOUSE_ROOT', '../lakehouse') }}/gold/dbt"
       threads: 4
+      # Without this, dbt-duckdb closes the shared connection whenever its open-handle count
+      # hits zero and reopens it for the next node. With several threads that close races a
+      # query still inside DuckDB and aborts the process (Fatal Python error: PyEval_SaveThread),
+      # about 1 run in 8 here. Keeping one connection open for the run removes the race.
+      keep_open: true
