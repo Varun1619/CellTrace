@@ -27,6 +27,9 @@ def build_spark(app_name: str, settings: Settings | None = None, local_test: boo
         .config("spark.ui.enabled", "false" if local_test else "true")
         .config("spark.sql.streaming.stateStore.stateSchemaCheck", "true")
         .config("spark.databricks.delta.schema.autoMerge.enabled", "false")
+        # Delta defaults to 50 partitions for log replay, sized for clusters, not one machine.
+        .config("spark.databricks.delta.snapshotPartitions", "2")
+        .config("spark.ui.showConsoleProgress", "false")
     )
     spark = configure_spark_with_delta_pip(builder, extra_packages=[KAFKA_PACKAGE]).getOrCreate()
     spark.sparkContext.setLogLevel("WARN")

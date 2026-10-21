@@ -6,7 +6,7 @@ RUN = $(COMPOSE) run --rm
 PY = python
 ARGS ?=
 
-.PHONY: env build up down generate stream pipeline dbt dashboard test test-local inspect recall logs
+.PHONY: env build up down reset generate stream pipeline dbt dashboard test test-local inspect recall logs
 
 env:
 	@$(PY) -c "import os, shutil; os.path.exists('.env') or shutil.copy('.env.example', '.env')"
@@ -20,6 +20,11 @@ up: env
 
 down:
 	$(COMPOSE) --profile "*" down
+
+# Deletes Kafka data and every lakehouse table and checkpoint. Generated data only.
+reset:
+	$(COMPOSE) --profile "*" down -v
+	$(PY) -c "import shutil, pathlib; [shutil.rmtree(p) for p in pathlib.Path('lakehouse').iterdir() if p.is_dir()]"
 
 generate: env
 	$(RUN) generator python -m generator.cell_test_producer $(ARGS)

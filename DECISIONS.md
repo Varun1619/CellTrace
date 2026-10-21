@@ -34,3 +34,72 @@ Windows turns out to be the bottleneck.
 ### Portable Makefile
 GNU make on Windows falls back to `cmd.exe` when no `sh` is on the PATH. Recipes use only
 `docker compose` and `python -c`, which behave the same under both shells.
+
+### Lakehouse on a named volume by default
+Measured inside the streaming container: 500 small-file write+rename cycles took 56 s on
+the Windows bind mount and 10.8 s on container storage. Delta logs and streaming checkpoints
+are exactly that workload, and micro-batches with a 10 s trigger were taking 20 to 50 s.
+`LAKEHOUSE_MOUNT` now defaults to a named volume. Setting it to `./lakehouse` brings back
+host-visible files at the cost of speed.
+
+## Phase 2: generator
+
+### Simulation core is pure and seeded
+`generator/simulator.py` takes timestamps and returns messages. It never reads the clock
+or touches Kafka. Tests drive it with a simulated clock and check distributions, fault
+shapes and assembly invariants in about 15 seconds without a broker. The same seed gives
+byte-identical output.
+
+### One spec table for PASS/FAIL
+Spec limits sit in `dbt/seeds/spec_limits.csv`. The generator decides PASS/FAIL from it
+and the dbt models derive failure causes from it, so the two cannot drift apart.
+Plausibility ranges (used for quarantine) are separate and much wider. A value outside
+them means a broken sensor, not a bad cell.
+
+### Faults start after the SPC baseline
+SPC limits come from the first 5 one-minute windows. The bad lot (lot 5 of 5,000 cells)
+starts around 6.7 minutes and station drift around 10 minutes, so neither one contaminates
+the limits it is meant to trip.
+
+### IDs carry a run tag
+Cell, lot, module and pack IDs include the generator start time (`C-10211557-00000001`).
+Restarting the generator cannot collide with an earlier run's lot IDs, which would
+otherwise corrupt recall lookups.
+
+### Late and duplicate events are held, not backdated
+A late event keeps its original `ts` and is released 10 to 300 s later. A duplicate is the
+identical payload re-sent 0.5 to 30 s later. That is how real out-of-order and at-least-once
+delivery looks to the consumer.
+
+## Phase 3: bronze and silver
+
+### Bronze stores raw strings
+Bronze keeps the Kafka key, the payload as text, and topic, partition, offset and ingest
+time. Nothing is parsed, so a schema bug in silver can be fixed and replayed from bronze.
+
+### Tables are created before streams start
+`streaming/tables.py` holds every schema and creates empty Delta tables up front. A
+downstream stream never fails because its upstream has not committed yet, and schemas are
+explicit, not inferred.
+
+### Quarantine keeps every reason
+A row with two problems gets `null_capacity_ah;out_of_range_temp_c`, not just the first
+reason. The raw payload is kept so the row can be reprocessed.
+
+### Dedup uses dropDuplicatesWithinWatermark
+Spark 3.5's `dropDuplicatesWithinWatermark` keeps the first copy of each `event_id`
+and expires state 10 minutes past the event time. Plain `dropDuplicates` with a watermark
+would also key state on the timestamp column, so a re-sent copy with a different arrival
+time could slip through.
+
+### Quality checks run inside the silver sink
+The cell-test and assembly sinks are `foreachBatch` writers. Each batch is checked
+(not-null keys, accepted values, plausible ranges, unique `event_id`) in one aggregation,
+metrics go to `silver.dq_batch_metrics`, and a failing batch stops the stream instead of
+writing bad data. Appends use Delta's `txnAppId`/`txnVersion`, so a replayed batch after
+a crash is not written twice.
+
+### Verified on a 5-minute run
+14,999 generated cells, 15,170 bronze rows (1.1% duplicates), 14,923 silver rows, 76
+quarantined, 0 duplicates left in silver. Silver plus quarantine reconciles exactly to the
+generator's count.

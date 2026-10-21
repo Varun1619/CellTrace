@@ -13,7 +13,7 @@ x-app: &app
     LAKEHOUSE_ROOT: /lakehouse
   volumes:
     - .:/app
-    - ${LAKEHOUSE_MOUNT:-./lakehouse}:/lakehouse
+    - ${LAKEHOUSE_MOUNT:-lakehouse}:/lakehouse
 
 services:
   kafka:
@@ -99,3 +99,4 @@ services:
 
 volumes:
   kafka-data:
+  lakehouse:
