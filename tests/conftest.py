@@ -3,6 +3,22 @@ import pytest
 from config.settings import load_settings
 
 
+def duckdb_delta_available() -> bool:
+    try:
+        from scripts.lakehouse import connect
+
+        connect().close()
+        return True
+    except Exception:
+        return False
+
+
+requires_duckdb_delta = pytest.mark.skipif(
+    not duckdb_delta_available(),
+    reason="DuckDB delta extension unavailable (not built for Windows); runs in Docker",
+)
+
+
 @pytest.fixture(scope="session")
 def spark(tmp_path_factory):
     pytest.importorskip("pyspark")
