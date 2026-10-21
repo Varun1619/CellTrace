@@ -82,7 +82,7 @@ def control_limits(baseline: pd.DataFrame, baseline_windows: int) -> pd.DataFram
     return pd.DataFrame(rows, columns=LIMIT_COLS)
 
 
-def _concat(frames: list[pd.DataFrame], columns: list[str]) -> pd.DataFrame:
+def concat_nonempty(frames: list[pd.DataFrame], columns: list[str]) -> pd.DataFrame:
     """pd.concat that skips empty frames (pandas warns about their dtypes otherwise)."""
     frames = [f for f in frames if not f.empty]
     return pd.concat(frames, ignore_index=True) if frames else pd.DataFrame(columns=columns)
@@ -92,7 +92,7 @@ def _limits_for_unbaselined(new: pd.DataFrame, history: pd.DataFrame, limits: pd
                             baseline_windows: int) -> tuple[pd.DataFrame, set]:
     """Compute limits for series that just reached the baseline size. Returns limits and baseline window keys."""
     have = set(map(tuple, limits[KEY].values)) if not limits.empty else set()
-    pending = _concat([history[history.z.isna()][new.columns.intersection(history.columns)], new], list(new.columns))
+    pending = concat_nonempty([history[history.z.isna()][new.columns.intersection(history.columns)], new], list(new.columns))
     pending = pending[[k not in have for k in map(tuple, pending[KEY].values)]]
     fresh = control_limits(pending, baseline_windows) if not pending.empty else pd.DataFrame(columns=LIMIT_COLS)
     used = set()
@@ -116,7 +116,7 @@ def process_batch(new: pd.DataFrame, history: pd.DataFrame, limits: pd.DataFrame
                   detected_at: datetime) -> SpcBatchResult:
     """Score newly closed windows against limits and history, creating limits once a baseline is complete."""
     fresh, baseline_keys = _limits_for_unbaselined(new, history, limits, baseline_windows)
-    all_limits = _concat([limits[LIMIT_COLS], fresh], LIMIT_COLS)
+    all_limits = concat_nonempty([limits[LIMIT_COLS], fresh], LIMIT_COLS)
     scored = new.merge(all_limits[["station_id", "metric", "center", "sigma"]], on=KEY, how="left")
     in_baseline = [(r.station_id, r.metric, r.window_start) in baseline_keys for r in scored.itertuples()]
     scored.loc[in_baseline, ["center", "sigma"]] = np.nan
