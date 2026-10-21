@@ -10,15 +10,19 @@ import logging
 
 from config.settings import get_settings
 from streaming.bronze_ingest import start_bronze
+from streaming.genealogy import start_genealogy
 from streaming.silver_transform import start_silver
 from streaming.spark_session import build_spark
-from streaming.tables import BRONZE_TABLES, SILVER_TABLES, ensure_tables
+from streaming.spc_monitor import start_spc
+from streaming.tables import BRONZE_TABLES, GOLD_TABLES, SILVER_TABLES, ensure_tables
 
 log = logging.getLogger("run_all")
 
 STAGES = {
     "bronze": start_bronze,
     "silver": start_silver,
+    "spc": start_spc,
+    "genealogy": start_genealogy,
 }
 
 
@@ -34,7 +38,7 @@ def main(argv: list[str] | None = None) -> None:
 
     settings = get_settings()
     spark = build_spark("celltrace-streaming", settings)
-    ensure_tables(spark, settings, [*BRONZE_TABLES.values(), *SILVER_TABLES.values()])
+    ensure_tables(spark, settings, [*BRONZE_TABLES.values(), *SILVER_TABLES.values(), *GOLD_TABLES.values()])
     for stage in stages:
         queries = STAGES[stage](spark, settings)
         log.info("started %s: %s", stage, ", ".join(q.name for q in queries))

@@ -26,11 +26,6 @@ explicitly so partition counts are intentional:
   events stay ordered.
 - `fault_log`, 1 partition. It is tiny and order matters.
 
-### Lakehouse location is configurable
-The lakehouse defaults to a bind mount at `./lakehouse` so the Delta files are visible from
-the host. `LAKEHOUSE_MOUNT` can point it at a named Docker volume if bind-mount I/O on
-Windows turns out to be the bottleneck.
-
 ### Portable Makefile
 GNU make on Windows falls back to `cmd.exe` when no `sh` is on the PATH. Recipes use only
 `docker compose` and `python -c`, which behave the same under both shells.
@@ -88,9 +83,9 @@ reason. The raw payload is kept so the row can be reprocessed.
 
 ### Dedup uses dropDuplicatesWithinWatermark
 Spark 3.5's `dropDuplicatesWithinWatermark` keeps the first copy of each `event_id`
-and expires state 10 minutes past the event time. Plain `dropDuplicates` with a watermark
-would also key state on the timestamp column, so a re-sent copy with a different arrival
-time could slip through.
+and expires state 10 minutes past the event time. Plain `dropDuplicates` only bounds its
+state if the event-time column is part of the key, so two copies of one event with
+different timestamps (a producer that re-stamps on retry) would both survive.
 
 ### Quality checks run inside the silver sink
 The cell-test and assembly sinks are `foreachBatch` writers. Each batch is checked
@@ -103,3 +98,48 @@ a crash is not written twice.
 14,999 generated cells, 15,170 bronze rows (1.1% duplicates), 14,923 silver rows, 76
 quarantined, 0 duplicates left in silver. Silver plus quarantine reconciles exactly to the
 generator's count.
+
+## Phase 4: SPC drift detection
+
+### X-bar chart on 1-minute subgroups with variable n
+Each station and metric is a series of 1-minute windows. Limits come from the first 5
+windows: the center is the n-weighted grand mean and sigma is the pooled within-window
+standard deviation (the X-bar/S approach). A later window is scored as
+`z = (mean - center) / (sigma / sqrt(n))`, so a window with fewer cells gets proportionally
+wider limits instead of false alarms.
+
+### Rules live in plain Python
+`streaming/spc_rules.py` holds the limits, scoring and the four Western Electric rules, with
+no Spark import. Each rule has a test with a known z sequence, and drift tests check that
+the right rule fires on the right window. `spc_monitor.py` is a thin Spark shell: a
+watermarked tumbling-window aggregation whose `foreachBatch` hands closed windows to the
+rules and appends what comes back.
+
+### History is read back from the gold table
+WE2 to WE4 need the previous points of a series. Each batch reads the last two hours of
+`gold.spc_window_stats` plus any unscored baseline rows. That keeps the streaming state
+small and makes the history visible to the dashboard for free.
+
+### Alerts are idempotent
+`alert_id` is a UUID5 of station, metric, rule and window start, and every append uses
+`txnAppId`/`txnVersion`. Replaying a batch after a crash cannot duplicate alerts.
+
+### Two clocks for time-to-detect
+`scripts/detection.py` reports fault start to the end of the first alerting window (event
+time, the statistical delay) and fault start to when the alert was written (wall clock,
+which adds the window, the 1-minute watermark and three 10-second trigger hops). On the
+first full run the statistics needed one window and the pipeline added about 97 seconds.
+
+### Measured on the first full run (20 minutes, 50 cells/s)
+- Station drift on L2-S3 (IR ramping 0.25 mOhm over 10 minutes): first alert WE1 after 195 s
+  wall clock, 98 s of event time, when the drift was 0.041 mOhm (3.4% of nominal).
+- Bad lot (capacity -0.12 Ah): first alert WE1 after 155 s wall clock, 58 s event time.
+- Unexplained alerts: 6 over 252 scored windows (2.4% per window), all on voltage.
+
+### Known tradeoff: a 5-window baseline is short
+With about 250 cells per window, estimating the center from 5 windows leaves it uncertain
+by about 0.45 sigma of the window mean. The side-of-center rules (WE3, WE4) are sensitive to
+that, which is the likely reason the false alarm rate is above the roughly 1.4% per point
+that the four rules give with exact limits. Textbook Phase I uses 20 to 25 subgroups. That
+would mean a 20-minute warm-up before any fault, so the demo keeps 5 and
+`SPC_BASELINE_WINDOWS` makes it a one-line change.

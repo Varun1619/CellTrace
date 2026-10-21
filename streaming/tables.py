@@ -63,6 +63,13 @@ SILVER_FAULT_LOG = _schema(
 SILVER_DQ_METRICS = _schema(
     ("query", S), ("batch_id", L), ("rows", L), ("checks_passed", B), ("failed_checks", S), ("checked_at", T),
 )
+SILVER_GENEALOGY = _schema(
+    ("cell_id", S), ("module_id", S), ("pack_id", S), ("line_id", S), ("valid_from", T), ("valid_to", T),
+    ("is_current", B), ("change_reason", S), ("source_event_id", S), ("updated_at", T),
+)
+SILVER_MODULE_PACK = _schema(
+    ("module_id", S), ("pack_id", S), ("line_id", S), ("packed_at", T), ("source_event_id", S),
+)
 
 GOLD_SPC_WINDOWS = _schema(
     ("station_id", S), ("metric", S), ("window_start", T), ("window_end", T), ("n", L), ("mean", D), ("std", D),
@@ -97,6 +104,8 @@ SILVER_TABLES = {
     "assembly_events_quarantine": TableDef("silver", "assembly_events_quarantine", SILVER_QUARANTINE),
     "fault_log": TableDef("silver", "fault_log", SILVER_FAULT_LOG),
     "dq_batch_metrics": TableDef("silver", "dq_batch_metrics", SILVER_DQ_METRICS),
+    "cell_genealogy": TableDef("silver", "cell_genealogy", SILVER_GENEALOGY),
+    "module_pack": TableDef("silver", "module_pack", SILVER_MODULE_PACK),
 }
 
 GOLD_TABLES = {
