@@ -47,6 +47,24 @@ def append(df: DataFrame, path: str, app_id: str, batch_id: int) -> None:
     df.write.format("delta").mode("append").option("txnAppId", app_id).option("txnVersion", batch_id).save(path)
 
 
+class BatchTimer:
+    """Per-stage wall time for one foreachBatch call, logged as a single line."""
+
+    def __init__(self, query: str, batch_id: int):
+        self.query, self.batch_id = query, batch_id
+        self.stages: list[tuple[str, float]] = []
+        self._last = time.perf_counter()
+
+    def mark(self, stage: str) -> None:
+        now = time.perf_counter()
+        self.stages.append((stage, now - self._last))
+        self._last = now
+
+    def log(self, rows: int) -> None:
+        parts = ", ".join(f"{name} {secs:.1f}s" for name, secs in self.stages)
+        log.info("%s batch %d: %d rows, %s", self.query, self.batch_id, rows, parts)
+
+
 def with_conflict_retry(fn: Callable[[], T], attempts: int = 5, base_delay_s: float = 1.0) -> T:
     """Retry a Delta write that lost an optimistic-concurrency race (for example against OPTIMIZE)."""
     for attempt in range(1, attempts + 1):

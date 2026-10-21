@@ -1,0 +1,49 @@
+name: ci
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  tests-and-dbt:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    env:
+      LAKEHOUSE_ROOT: ${{ github.workspace }}/lakehouse
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+      - name: pytest (unit, Spark streaming, DuckDB and dashboard tests)
+        run: pytest -q
+      - name: Seed a lakehouse from the pure cores (no Kafka or Spark)
+        run: python -m scripts.seed_lakehouse --minutes 20
+      - name: dbt build (models and data tests)
+        run: python -m scripts.run_dbt build
+
+  airflow-dag:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install Airflow with its published constraints
+        run: |
+          pip install "apache-airflow==2.10.5" pytest==8.3.4 python-dotenv==1.0.1 \
+            --constraint "https://raw.githubusercontent.com/apache/airflow/constraints-2.10.5/constraints-3.11.txt"
+      - name: DAG tests
+        env:
+          PYTHONPATH: airflow/dags
+        run: |
+          airflow db migrate > /dev/null
+          pytest -q -p no:cacheprovider tests/airflow

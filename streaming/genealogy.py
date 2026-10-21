@@ -12,7 +12,7 @@ from pyspark.sql.streaming import StreamingQuery
 
 from config.settings import Settings, get_settings
 from streaming.bronze_ingest import default_trigger
-from streaming.delta_io import append, read_pdf, to_spark, utcnow, with_conflict_retry
+from streaming.delta_io import BatchTimer, append, read_pdf, to_spark, utcnow, with_conflict_retry
 from streaming.genealogy_rules import GENEALOGY_COLS, MODULE_PACK_COLS, apply_assembly_events
 from streaming.spark_session import build_spark
 from streaming.tables import SILVER_GENEALOGY, SILVER_MODULE_PACK, SILVER_TABLES, ensure_tables
@@ -38,7 +38,9 @@ def genealogy_writer(settings: Settings):
     module_pack_path = settings.table_path("silver", "module_pack")
 
     def write(batch: DataFrame, batch_id: int) -> None:
+        timer = BatchTimer(QUERY, batch_id)
         events = batch.toPandas()
+        timer.mark("to_pandas")
         if events.empty:
             return
         spark = batch.sparkSession
@@ -47,7 +49,9 @@ def genealogy_writer(settings: Settings):
         current = read_pdf(spark, genealogy_path, GENEALOGY_COLS,
                            F.col("is_current") & (F.col("cell_id").isin(cells) | F.col("module_id").isin(modules)))
         known = read_pdf(spark, module_pack_path, MODULE_PACK_COLS, F.col("module_id").isin(modules))
+        timer.mark("read_current")
         changes = apply_assembly_events(current, dict(zip(known.module_id, known.pack_id)), events)
+        timer.mark("apply")
 
         if not changes.rows.empty:
             rows = to_spark(spark, changes.rows.assign(updated_at=utcnow()), SILVER_GENEALOGY)
@@ -55,6 +59,8 @@ def genealogy_writer(settings: Settings):
         if not changes.module_packs.empty:
             packs = to_spark(spark, changes.module_packs, SILVER_MODULE_PACK)
             with_conflict_retry(lambda: append(packs, module_pack_path, f"{QUERY}_module_pack", batch_id))
+        timer.mark("write")
+        timer.log(len(events))
 
     return write
 

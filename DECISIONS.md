@@ -254,3 +254,28 @@ cumulative share in the hover instead of the classic dual-axis Pareto.
 `scripts/seed_lakehouse.py` runs the simulator, the silver rules, the genealogy rules and
 the SPC engine in-process and writes every table with delta-rs. CI uses it to give
 `dbt build` real data without Kafka or Spark. Seeded alerts have no pipeline latency.
+
+### Measured throughput and where the limit is
+A 2-minute burst at 1,000 cells/s (1,768 messages/s with assembly events) reached silver in
+full 189 s after the producer stopped: about 736 messages/s, or 400 cells/s, sustained end to
+end, 7x the default rate. `BatchTimer` logs each sink's stages per micro-batch. They show a
+fixed cost of 20 to 40 s per batch whether it holds 500 or 35,000 rows: state-store and
+Delta commits, with 13 streaming queries sharing 8 cores. The pandas and rule work is under
+a second. Two consequences:
+- Longer triggers raise throughput at the cost of detection latency.
+- Genealogy's `read_current` scans the whole genealogy table each batch (20 to 43 s by the
+  end of the burst) and grows with it. At scale the current versions belong in their own
+  small table or a table clustered by `cell_id`.
+
+### Surviving a sleeping laptop
+The dev machine suspended several times during long runs. Spark local mode declared its only
+executor lost after the 120 s default `spark.network.timeout` and stopped the context. The
+timeout is now an hour, and the streaming service has `restart: unless-stopped`. A restart
+is safe because every source resumes from its checkpoint and every sink is idempotent.
+After one such crash, an anti-join showed every bronze event in silver or quarantine exactly
+once.
+
+### Counting false alarms as episodes
+WE3 and WE4 keep firing on every window while a series stays off-center, so one condition
+can produce six alerts. The README reports unexplained alerts as episodes (consecutive
+alerting windows on one series) alongside the raw per-window count.

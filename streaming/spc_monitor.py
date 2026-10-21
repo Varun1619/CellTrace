@@ -19,7 +19,7 @@ from pyspark.sql.streaming import StreamingQuery
 
 from config.settings import Settings, get_settings
 from streaming.bronze_ingest import default_trigger
-from streaming.delta_io import append, read_pdf, to_spark, utcnow, with_conflict_retry
+from streaming.delta_io import BatchTimer, append, read_pdf, to_spark, utcnow, with_conflict_retry
 from streaming.spark_session import build_spark
 from streaming.spc_rules import LIMIT_COLS, SPC_METRICS, WINDOW_COLS, process_batch
 from streaming.tables import (
@@ -61,7 +61,9 @@ def spc_writer(settings: Settings):
     paths = {name: settings.table_path("gold", name) for name in GOLD_TABLES}
 
     def write(batch: DataFrame, batch_id: int) -> None:
+        timer = BatchTimer(QUERY, batch_id)
         wide = batch.toPandas()
+        timer.mark("to_pandas")
         if wide.empty:
             return
         spark = batch.sparkSession
@@ -71,7 +73,9 @@ def spc_writer(settings: Settings):
                         (F.col("window_start") >= F.lit(since)) | F.col("z").isNull())
         limits = read_pdf(spark, paths["spc_control_limits"], LIMIT_COLS)
         now = utcnow()
+        timer.mark("read_history")
         result = process_batch(new, history, limits, settings.spc.baseline_windows, detected_at=now)
+        timer.mark("rules")
 
         outputs = [
             (result.new_limits.assign(computed_at=now), GOLD_SPC_LIMITS, "spc_control_limits", "limits"),
@@ -83,6 +87,8 @@ def spc_writer(settings: Settings):
             if not pdf.empty:
                 df = to_spark(spark, pdf, schema)
                 with_conflict_retry(lambda: append(df, paths[table], f"{QUERY}_{suffix}", batch_id))
+        timer.mark("write")
+        timer.log(len(new))
 
     return write
 

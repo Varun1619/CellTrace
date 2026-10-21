@@ -17,6 +17,7 @@ from pyspark.sql.types import StructType
 from config.settings import Settings, get_settings
 from config.specs import METRICS, PLAUSIBLE_RANGES
 from streaming.bronze_ingest import default_trigger
+from streaming.delta_io import BatchTimer
 from streaming.quality import DataQualityError, assembly_checks, cell_test_checks, failed_checks
 from streaming.spark_session import build_spark
 from streaming.tables import (
@@ -135,12 +136,15 @@ def checked_writer(path: str, dq_path: str, query: str, checks: Callable[[], lis
     """foreachBatch sink: assert quality, record metrics, then append idempotently per batch id."""
 
     def write(batch: DataFrame, batch_id: int) -> None:
+        timer = BatchTimer(query, batch_id)
         batch.persist()
         try:
             rows = batch.count()
+            timer.mark("count")
             if rows == 0:
                 return
             failed = failed_checks(batch, checks())
+            timer.mark("checks")
             metrics = [(query, batch_id, rows, not failed, ";".join(failed), datetime.now(timezone.utc))]
             (batch.sparkSession.createDataFrame(metrics, SILVER_DQ_METRICS).write.format("delta").mode("append")
              .option("txnAppId", f"{query}_dq").option("txnVersion", batch_id).save(dq_path))
@@ -148,6 +152,8 @@ def checked_writer(path: str, dq_path: str, query: str, checks: Callable[[], lis
                 raise DataQualityError(f"{query} batch {batch_id} failed checks: {failed}")
             (batch.write.format("delta").mode("append")
              .option("txnAppId", query).option("txnVersion", batch_id).save(path))
+            timer.mark("write")
+            timer.log(rows)
         finally:
             batch.unpersist()
 

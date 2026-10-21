@@ -123,6 +123,8 @@ services:
     <<: *app
     profiles: ["pipeline"]
     command: ["python", "-m", "streaming.run_all"]
+    # Checkpoints and idempotent sinks make a restart safe; it resumes where it stopped.
+    restart: unless-stopped
     ports:
       - "${SPARK_UI_PORT:-4045}:4040"
     depends_on:

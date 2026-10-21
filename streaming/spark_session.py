@@ -30,6 +30,10 @@ def build_spark(app_name: str, settings: Settings | None = None, local_test: boo
         # Delta defaults to 50 partitions for log replay, sized for clusters, not one machine.
         .config("spark.databricks.delta.snapshotPartitions", "2")
         .config("spark.ui.showConsoleProgress", "false")
+        # Local mode has no remote executors. A laptop that sleeps longer than the default 120 s
+        # timeout would otherwise get its only executor declared lost and the context stopped.
+        .config("spark.network.timeout", "3600s")
+        .config("spark.executor.heartbeatInterval", "30s")
     )
     spark = configure_spark_with_delta_pip(builder, extra_packages=[KAFKA_PACKAGE]).getOrCreate()
     spark.sparkContext.setLogLevel("WARN")
