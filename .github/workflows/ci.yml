@@ -25,7 +25,7 @@ jobs:
       - name: pytest (unit, Spark streaming, DuckDB and dashboard tests)
         run: pytest -q
       - name: Seed a lakehouse from the pure cores (no Kafka or Spark)
-        run: python -m scripts.seed_lakehouse --minutes 20
+        run: python -m scripts.seed_lakehouse --minutes 40
       - name: dbt build (models and data tests)
         run: python -m scripts.run_dbt build
 

@@ -9,7 +9,7 @@ def test_defaults_without_env():
     assert s.topics.cell_tests == "cell_tests"
     assert s.generator.rate == 50
     assert s.generator.cells_per_module == 46
-    assert s.spc.baseline_windows == 5
+    assert s.spc.baseline_windows == 20
 
 
 def test_env_overrides_and_types():

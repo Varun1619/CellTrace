@@ -104,10 +104,10 @@ def load_settings(env: Mapping[str, str] | None = None) -> Settings:
         cells_per_module=int(get("CELLS_PER_MODULE", "46")),
         modules_per_pack=int(get("MODULES_PER_PACK", "4")),
         drift_station=get("DRIFT_STATION", "L2-S3"),
-        drift_start_after_s=float(get("DRIFT_START_AFTER_S", "600")),
+        drift_start_after_s=float(get("DRIFT_START_AFTER_S", "1560")),
         drift_ramp_s=float(get("DRIFT_RAMP_S", "600")),
         drift_ir_max_delta_mohm=float(get("DRIFT_IR_MAX_DELTA_MOHM", "0.25")),
-        bad_lot_index=int(get("BAD_LOT_INDEX", "5")),
+        bad_lot_index=int(get("BAD_LOT_INDEX", "15")),
         bad_lot_capacity_delta_ah=float(get("BAD_LOT_CAPACITY_DELTA_AH", "-0.12")),
         sensor_dropout_rate=float(get("SENSOR_DROPOUT_RATE", "0.005")),
         duplicate_rate=float(get("DUPLICATE_RATE", "0.01")),
@@ -133,7 +133,7 @@ def load_settings(env: Mapping[str, str] | None = None) -> Settings:
         spc=SpcConfig(
             window=get("SPC_WINDOW", "1 minute"),
             watermark=get("SPC_WATERMARK", "1 minute"),
-            baseline_windows=int(get("SPC_BASELINE_WINDOWS", "5")),
+            baseline_windows=int(get("SPC_BASELINE_WINDOWS", "20")),
         ),
         dashboard_port=int(get("DASHBOARD_PORT", "8501")),
     )

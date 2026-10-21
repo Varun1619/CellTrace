@@ -27,7 +27,9 @@ RULES = {
 }
 # Sigma multiple of the limit each rule tests against (WE4 tests the center line).
 RULE_SIGMA = {"WE1": 3, "WE2": 2, "WE3": 1, "WE4": 0}
-HISTORY_NEEDED = 7
+# How many earlier windows each rule looks at besides the current one.
+RULE_LOOKBACK = {"WE1": 0, "WE2": 2, "WE3": 4, "WE4": 7}
+HISTORY_NEEDED = max(RULE_LOOKBACK.values())
 KEY = ["station_id", "metric"]
 WINDOW_COLS = ["station_id", "metric", "window_start", "window_end", "n", "mean", "std", "center", "sigma_xbar", "z"]
 LIMIT_COLS = ["station_id", "metric", "center", "sigma", "baseline_windows", "baseline_n"]

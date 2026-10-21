@@ -15,7 +15,7 @@ def seeded(tmp_path_factory):
         "LAKEHOUSE_ROOT": str(tmp_path_factory.mktemp("seeded")),
         "GENERATOR_RATE": "20", "CELLS_PER_LOT": "1000", "BAD_LOT_INDEX": "5",
         "DRIFT_START_AFTER_S": "420", "DRIFT_RAMP_S": "60", "DRIFT_IR_MAX_DELTA_MOHM": "0.3",
-        "SENSOR_DROPOUT_RATE": "0.01", "DUPLICATE_RATE": "0.02", "REWORK_RATE": "0.01",
+        "SENSOR_DROPOUT_RATE": "0.01", "SPC_BASELINE_WINDOWS": "5", "DUPLICATE_RATE": "0.02", "REWORK_RATE": "0.01",
     })
     summary = seed(settings, minutes=10)
     return settings, summary

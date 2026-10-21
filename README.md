@@ -55,8 +55,8 @@ make dashboard
 ```
 
 `make pipeline` starts Kafka, creates the topics, and runs the generator and all
-streaming stages. Open the dashboard at http://localhost:8501. The SPC baseline takes 5
-minutes, the bad lot appears around minute 7, and station L2-S3 starts drifting at minute 10.
+streaming stages. Open the dashboard at http://localhost:8501. The SPC baseline takes 20
+minutes, the bad lot appears around minute 23, and station L2-S3 starts drifting at minute 26.
 
 Other entry points:
 
@@ -90,7 +90,7 @@ quarantines bad rows with every reason that applies, drops duplicate `event_id`s
 10-minute watermark, and asserts data quality on each micro-batch before an idempotent append.
 
 The SPC monitor (`streaming/spc_monitor.py`, rules in `streaming/spc_rules.py`) builds an
-X-bar chart for every station and metric from 1-minute windows. The first 5 windows set the
+X-bar chart for every station and metric from 1-minute windows. The first 20 windows set the
 limits, then each window is scored and checked against the four Western Electric rules.
 
 Genealogy (`streaming/genealogy.py`, rules in `streaming/genealogy_rules.py`) keeps
@@ -104,22 +104,22 @@ daily report to `gold.daily_quality_report`.
 
 ## Results
 
-Measured on a laptop (8 cores, 16 GB, Docker Desktop on Windows), one 20-minute run at the
-default 50 cells per second, then a throughput burst.
+Measured on a laptop (8 cores, 16 GB, Docker Desktop on Windows): one 38-minute run at the
+default 50 cells per second with a 20-window SPC baseline, plus a separate throughput burst.
 
 | Measure | Result |
 |---|---|
-| Station drift (IR +0.25 mOhm ramped over 10 min) | First alert (WE1) 195 s after onset: 98 s of event time plus pipeline latency |
-| Drift size when caught | 0.041 mOhm, 3.4% of nominal IR |
-| Bad lot (capacity -0.12 Ah) | First alert 155 s after the lot's first cell (58 s event time); dbt flags it at z = -168 |
-| Recall lookup | Bad lot traced to 17 packs, 56 modules and 2,415 cells in 340 ms (670 ms before OPTIMIZE) |
-| Data correctness | Every bronze event lands in silver or quarantine exactly once; 609 duplicates (1.0%) removed |
-| Sustained throughput | About 736 messages/s (about 400 cells/s) end to end, 7x the default rate |
-| Unexplained alerts | 18 alert episodes on 13 of 36 series in 15 monitored minutes (see below) |
-| Tests | 84 pytest tests (unit, Spark streaming, DuckDB, dashboard), 4 Airflow DAG tests, 46 dbt data tests |
+| Station drift (IR +0.25 mOhm ramped over 10 min) | First alert (WE1) 191 s after onset: 85 s of event time plus pipeline latency |
+| Drift size when caught | 0.036 mOhm, 3.0% of nominal IR |
+| Bad lot (capacity -0.12 Ah) | First alert 103 s after the lot's first cell; dbt flags it at z = -169 |
+| Recall lookup | Bad lot traced to 15 packs, 55 modules and 2,440 cells in 420 ms (557 ms before OPTIMIZE) |
+| Data correctness | 113,997 generated cells = 113,416 silver + 581 quarantined; duplicates removed |
+| Sustained throughput | About 736 messages/s (about 400 cells/s) end to end, 8x the default rate |
+| Unexplained alerts | 2.45% of scored windows: 11 episodes on 9 of 36 series in 17 monitored minutes |
+| Tests | 88 pytest tests (unit, Spark streaming, DuckDB, dashboard), 4 Airflow DAG tests, 46 dbt data tests |
 
-Wall-clock time-to-detect adds about 97 seconds to the statistics: the 1-minute window, the
-1-minute watermark that waits for late events, and three 10-second trigger hops from Kafka
+Wall-clock time-to-detect adds about 100 seconds to the statistics: the 1-minute window,
+the 1-minute watermark that waits for late events, and three 10-second trigger hops from Kafka
 to bronze to silver to SPC.
 
 Throughput was measured with a 2-minute burst at 1,000 cells/s (1,768 messages/s produced).
@@ -128,11 +128,13 @@ limit is fixed cost per micro-batch (state store and Delta commits across 13 con
 queries on 8 cores), not data volume: a sink takes 20 to 40 s for 500 rows or 35,000 rows
 alike. Longer triggers trade latency for throughput.
 
-The unexplained alerts come from the short SPC baseline. Five 1-minute windows estimate each
-center line from about 1,250 cells, which leaves it uncertain by about 0.45 sigma of a
-window mean, and the side-of-center rules (WE3, WE4) then fire on series that are in
-control. A 20-window baseline would fix it at the cost of a 20-minute warm-up before any
-fault; `SPC_BASELINE_WINDOWS` makes that a one-line change.
+The SPC baseline length matters. The first run used 5 baseline windows, which leaves each
+center line uncertain by about 0.45 sigma of a window mean; 6.25% of scored windows raised an
+alert no fault explained. With 20 windows that uncertainty halves and the same count fell to
+3.10%. Counting an alert as explained when its rule's lookback overlaps a fault (WE4 looks at
+8 windows, so it can fire minutes after a bad lot) gives the 2.45% in the table. Even perfect
+limits would leave about 1.1%: the four rules together have an in-control average run length
+of about 92 points.
 
 ## Design decisions
 
@@ -175,8 +177,9 @@ runs the whole suite on Ubuntu, seeds a lakehouse with `scripts/seed_lakehouse.p
 - Partitioning and clustering. Silver partitioned by test date and clustered by line and
   station; genealogy clustered by `cell_id` and `lot_id` so recall stays a point lookup at
   billions of cells.
-- Per-station SPC with longer baselines (20 to 25 subgroups), rational subgrouping by shift,
-  and EWMA or CUSUM charts for slow drifts that Western Electric rules catch late.
+- SPC limits that are re-baselined on recipe or material changes instead of once, rational
+  subgrouping by shift, and EWMA or CUSUM charts for slow drifts that Western Electric rules
+  catch late.
 - Separate compute for streaming and batch, with OPTIMIZE and VACUUM on a schedule tuned to
   the streams' checkpoint retention.
 

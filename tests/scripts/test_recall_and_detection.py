@@ -104,3 +104,18 @@ def test_time_to_detect_uses_first_matching_alert_after_fault_start(lake):
 
     attributed = alert_attribution(lake, lot_duration_s=100)
     assert attributed.attributed.tolist().count(False) == 3
+
+
+def test_lookback_rules_after_a_bad_lot_are_attributed_to_it(lake):
+    from scripts.detection import alert_attribution
+
+    write(lake, "silver", "fault_log", [
+        {"fault_id": "f2", "run_id": "r", "fault_type": "BAD_LOT", "target": "LOT-5", "metric": "capacity_ah",
+         "started_at": T0 + timedelta(minutes=10), "magnitude": -0.12, "details": "", "ingest_ts": T0}])
+    write(lake, "gold", "spc_alerts", [
+        alert("L1-S1", "capacity_ah", "WE4", 16, 17),  # its 8-window lookback (9..16) covers the lot at 10-11
+        alert("L1-S1", "capacity_ah", "WE1", 16, 17),  # a single point 5 minutes after the lot: unexplained
+        alert("L1-S1", "capacity_ah", "WE4", 19, 20),  # lookback 12..19 starts after the lot ended
+    ])
+    a = alert_attribution(lake, lot_duration_s=100).sort_values(["window_start", "rule_triggered"])
+    assert list(zip(a.rule_triggered, a.attributed)) == [("WE1", False), ("WE4", True), ("WE4", False)]

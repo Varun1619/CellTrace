@@ -32,5 +32,6 @@ def spark(tmp_path_factory):
 
 @pytest.fixture
 def lake(tmp_path):
-    """Settings pointing at an empty, per-test lakehouse."""
-    return load_settings(env={"LAKEHOUSE_ROOT": str(tmp_path / "lake"), "STREAM_TRIGGER_SECONDS": "1"})
+    """Settings pointing at an empty, per-test lakehouse. A 5-window SPC baseline keeps stream tests short."""
+    return load_settings(env={"LAKEHOUSE_ROOT": str(tmp_path / "lake"), "STREAM_TRIGGER_SECONDS": "1",
+                              "SPC_BASELINE_WINDOWS": "5"})

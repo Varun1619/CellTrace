@@ -74,7 +74,10 @@ def alerts_tab() -> None:
     ttd = cached("time_to_detect")
     st.subheader("Time to detect injected faults")
     if ttd.empty:
-        st.info("No faults logged yet. Station drift starts 10 minutes into a generator run.")
+        g = settings.generator
+        bad_lot_min = (g.bad_lot_index - 1) * g.cells_per_lot / g.rate / 60
+        st.info(f"No faults logged yet. The SPC baseline takes {settings.spc.baseline_windows} minutes; the bad lot "
+                f"starts around minute {bad_lot_min:.0f} and station drift at minute {g.drift_start_after_s / 60:.0f}.")
     else:
         cols = st.columns(max(len(ttd), 1))
         for col, row in zip(cols, ttd.itertuples()):

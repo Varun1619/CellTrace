@@ -1,6 +1,6 @@
 """Build a complete lakehouse in seconds, without Kafka or Spark, from the same pure cores.
 
-    python -m scripts.seed_lakehouse --minutes 20
+    python -m scripts.seed_lakehouse --minutes 40
 
 Used by CI (dbt needs real tables to test) and for trying dbt or the dashboard without
 starting the streams. It simulates `minutes` of production on a simulated clock, applies
@@ -106,7 +106,7 @@ def _spc(settings: Settings, clean: pd.DataFrame) -> tuple[pd.DataFrame, pd.Data
     return concat_nonempty(scored, EMPTY_WINDOWS), concat_nonempty(new_limits, LIMIT_COLS), alerts_df
 
 
-def seed(settings: Settings, minutes: float = 20, start: datetime = START) -> dict:
+def seed(settings: Settings, minutes: float = 40, start: datetime = START) -> dict:
     cfg = settings.generator
     messages = run_simulation(cfg, n_cells=int(minutes * 60 * cfg.rate), start=start)
     by_topic = {t: pd.DataFrame([m.value for m in messages if m.topic == t])
@@ -145,7 +145,7 @@ def seed(settings: Settings, minutes: float = 20, start: datetime = START) -> di
 
 def main(argv: list[str] | None = None) -> None:
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    p.add_argument("--minutes", type=float, default=20, help="minutes of simulated production")
+    p.add_argument("--minutes", type=float, default=40, help="minutes of simulated production")
     args = p.parse_args(argv)
     for k, v in seed(get_settings(), args.minutes).items():
         print(f"{k:<22} {v}")

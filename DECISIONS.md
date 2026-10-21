@@ -52,9 +52,10 @@ Plausibility ranges (used for quarantine) are separate and much wider. A value o
 them means a broken sensor, not a bad cell.
 
 ### Faults start after the SPC baseline
-SPC limits come from the first 5 one-minute windows. The bad lot (lot 5 of 5,000 cells)
-starts around 6.7 minutes and station drift around 10 minutes, so neither one contaminates
-the limits it is meant to trip.
+SPC limits come from the first 20 one-minute windows. The bad lot (lot 15 of 5,000 cells)
+starts around minute 23 and station drift at minute 26, so neither one contaminates the
+limits it is meant to trip. (The first full run used a 5-window baseline with faults at
+minutes 7 and 10; see Phase 4 for why that changed.)
 
 ### IDs carry a run tag
 Cell, lot, module and pack IDs include the generator start time (`C-10211557-00000001`).
@@ -130,19 +131,32 @@ time, the statistical delay) and fault start to when the alert was written (wall
 which adds the window, the 1-minute watermark and three 10-second trigger hops). On the
 first full run the statistics needed one window and the pipeline added about 97 seconds.
 
-### Measured on the first full run (20 minutes, 50 cells/s)
+### Measured on the first full run (20 minutes, 50 cells/s, 5-window baseline)
 - Station drift on L2-S3 (IR ramping 0.25 mOhm over 10 minutes): first alert WE1 after 195 s
   wall clock, 98 s of event time, when the drift was 0.041 mOhm (3.4% of nominal).
 - Bad lot (capacity -0.12 Ah): first alert WE1 after 155 s wall clock, 58 s event time.
 - Unexplained alerts: 6 over 252 scored windows (2.4% per window), all on voltage.
 
-### Known tradeoff: a 5-window baseline is short
+### The baseline went from 5 windows to 20
 With about 250 cells per window, estimating the center from 5 windows leaves it uncertain
-by about 0.45 sigma of the window mean. The side-of-center rules (WE3, WE4) are sensitive to
-that, which is the likely reason the false alarm rate is above the roughly 1.1% per point
-(an in-control average run length of about 92) that the four rules give with exact limits. Textbook Phase I uses 20 to 25 subgroups. That
-would mean a 20-minute warm-up before any fault, so the demo keeps 5 and
-`SPC_BASELINE_WINDOWS` makes it a one-line change.
+by about 0.45 sigma of the window mean, and the side-of-center rules (WE3, WE4) fire on series
+that are in control. On the first run 6.25% of scored windows raised an alert no fault
+explained (18 episodes on 13 of 36 series).
+
+Textbook Phase I uses 20 to 25 subgroups, so the default is now 20, with the bad lot moved
+to minute 23 and the drift to minute 26. On a 38-minute run the same measure fell to 3.10%
+(612 scored windows), with no loss of speed: drift was caught in 191 s at 0.036 mOhm, against
+195 s at 0.041 mOhm before, because a tighter center line also shrinks the miss. The cost is
+a 20-minute warm-up before monitoring starts. The four rules alone would give about 1.1% per
+window with exact limits (an in-control average run length of about 92).
+
+### Attribution follows each rule's lookback
+WE2, WE3 and WE4 look back 2, 4 and 7 windows. A WE4 alert minutes after a bad lot can be
+caused by the lot's windows inside its lookback. `scripts/detection.py` now counts an alert as
+explained when the earliest window its rule looked at overlaps the fault (rule lookbacks
+come from `RULE_LOOKBACK` in `spc_rules.py`). The bad lot's grace period also dropped from
+two windows to one, because SPC discards events later than its 1-minute watermark. With
+this, the 38-minute run's unexplained rate is 2.45%: 15 alerts in 11 episodes on 9 series.
 
 ## Phase 5: genealogy and recall
 
@@ -258,7 +272,7 @@ the SPC engine in-process and writes every table with delta-rs. CI uses it to gi
 ### Measured throughput and where the limit is
 A 2-minute burst at 1,000 cells/s (1,768 messages/s with assembly events) reached silver in
 full 189 s after the producer stopped: about 736 messages/s, or 400 cells/s, sustained end to
-end, 7x the default rate. `BatchTimer` logs each sink's stages per micro-batch. They show a
+end, 8x the default rate. `BatchTimer` logs each sink's stages per micro-batch. They show a
 fixed cost of 20 to 40 s per batch whether it holds 500 or 35,000 rows: state-store and
 Delta commits, with 13 streaming queries sharing 8 cores. The pandas and rule work is under
 a second. Two consequences:
