@@ -1,0 +1,15 @@
+# Runtime for generator, streaming jobs, dbt, scripts and dashboard (app image).
+pyspark==3.5.3
+delta-spark==3.2.1
+confluent-kafka==2.6.1
+numpy==1.26.4
+pandas==2.2.3
+pyarrow==17.0.0
+python-dotenv==1.0.1
+duckdb==1.1.3
+deltalake==0.22.3
+dbt-core==1.9.1
+dbt-duckdb==1.9.1
+streamlit==1.40.2
+plotly==5.24.1
+pytest==8.3.4

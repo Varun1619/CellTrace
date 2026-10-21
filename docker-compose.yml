@@ -1,0 +1,101 @@
+name: celltrace
+
+x-app: &app
+  build:
+    context: .
+    dockerfile: docker/app.Dockerfile
+  image: celltrace-app:latest
+  env_file:
+    - path: .env
+      required: false
+  environment:
+    KAFKA_BOOTSTRAP_SERVERS: kafka:29092
+    LAKEHOUSE_ROOT: /lakehouse
+  volumes:
+    - .:/app
+    - ${LAKEHOUSE_MOUNT:-./lakehouse}:/lakehouse
+
+services:
+  kafka:
+    image: apache/kafka:3.8.1
+    hostname: kafka
+    ports:
+      - "${KAFKA_PORT:-9092}:9092"
+    environment:
+      CLUSTER_ID: 4L6g3nShT-eMCtK--X86sw
+      KAFKA_NODE_ID: 1
+      KAFKA_PROCESS_ROLES: broker,controller
+      KAFKA_LISTENERS: PLAINTEXT://:29092,CONTROLLER://:29093,PLAINTEXT_HOST://:9092
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:29092,PLAINTEXT_HOST://localhost:${KAFKA_PORT:-9092}
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT
+      KAFKA_CONTROLLER_QUORUM_VOTERS: 1@kafka:29093
+      KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
+      KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+      KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "false"
+      KAFKA_LOG_RETENTION_HOURS: 72
+    volumes:
+      - kafka-data:/var/lib/kafka/data
+    healthcheck:
+      test: ["CMD-SHELL", "/opt/kafka/bin/kafka-broker-api-versions.sh --bootstrap-server localhost:9092 > /dev/null 2>&1"]
+      interval: 10s
+      timeout: 10s
+      retries: 12
+      start_period: 15s
+
+  kafka-init:
+    image: apache/kafka:3.8.1
+    profiles: ["init"]
+    depends_on:
+      kafka:
+        condition: service_healthy
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        set -e
+        T=/opt/kafka/bin/kafka-topics.sh
+        $$T --bootstrap-server kafka:29092 --create --if-not-exists --topic ${TOPIC_CELL_TESTS:-cell_tests} --partitions 3 --replication-factor 1
+        $$T --bootstrap-server kafka:29092 --create --if-not-exists --topic ${TOPIC_ASSEMBLY_EVENTS:-assembly_events} --partitions 3 --replication-factor 1
+        $$T --bootstrap-server kafka:29092 --create --if-not-exists --topic ${TOPIC_FAULT_LOG:-fault_log} --partitions 1 --replication-factor 1
+        $$T --bootstrap-server kafka:29092 --list
+
+  kafka-ui:
+    image: provectuslabs/kafka-ui:v0.7.2
+    ports:
+      - "${KAFKA_UI_PORT:-8085}:8080"
+    environment:
+      KAFKA_CLUSTERS_0_NAME: celltrace
+      KAFKA_CLUSTERS_0_BOOTSTRAPSERVERS: kafka:29092
+      DYNAMIC_CONFIG_ENABLED: "false"
+    depends_on:
+      kafka:
+        condition: service_healthy
+
+  # One-off commands: tests, dbt, scripts. Started with `docker compose run --rm app ...`.
+  app:
+    <<: *app
+    profiles: ["tools"]
+
+  generator:
+    <<: *app
+    profiles: ["pipeline"]
+    command: ["python", "-m", "generator.cell_test_producer"]
+    depends_on:
+      kafka:
+        condition: service_healthy
+
+  streaming:
+    <<: *app
+    profiles: ["pipeline"]
+    command: ["python", "-m", "streaming.run_all"]
+    ports:
+      - "${SPARK_UI_PORT:-4045}:4040"
+    depends_on:
+      kafka:
+        condition: service_healthy
+
+volumes:
+  kafka-data:

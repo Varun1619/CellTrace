@@ -1,0 +1,12 @@
+[project]
+name = "celltrace"
+version = "0.1.0"
+requires-python = ">=3.11"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
+markers = [
+    "spark: needs a local SparkSession with Delta (Java 17)",
+]
+filterwarnings = ["ignore::DeprecationWarning"]
