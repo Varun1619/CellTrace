@@ -97,6 +97,13 @@ Genealogy (`streaming/genealogy.py`, rules in `streaming/genealogy_rules.py`) ke
 `silver.cell_genealogy` as SCD Type 2. Rework closes a version and opens a new one. A pack
 assignment fills `pack_id` on the open version instead, because the cell did not move.
 
+The dashboard (`dashboard/`) opens on a KPI row and a plant status grid that marks each of the
+12 stations and 3 metrics as in control, watch or alert, with the worst series preselected. Under
+the control chart a z-score panel shows the same windows in sigma units with the zones shaded, so a
+large drift never flattens the in-control detail. The Yield tab has a station-by-time failure
+heatmap, the Alerts tab groups alerts into episodes, and the Recall tab summarizes every affected
+pack.
+
 dbt (`dbt/`) builds first-pass yield, a defect Pareto, lot quality with an outlier flag,
 station and lot dimensions, and a daily report, with 46 data tests. The Airflow DAG
 (`airflow/dags/celltrace_daily.py`) runs dbt, compacts and vacuums silver, and publishes the
@@ -116,7 +123,7 @@ default 50 cells per second with a 20-window SPC baseline, plus a separate throu
 | Data correctness | 113,997 generated cells = 113,416 silver + 581 quarantined; duplicates removed |
 | Sustained throughput | About 736 messages/s (about 400 cells/s) end to end, 8x the default rate |
 | Unexplained alerts | 2.45% of scored windows: 11 episodes on 9 of 36 series in 17 monitored minutes |
-| Tests | 88 pytest tests (unit, Spark streaming, DuckDB, dashboard), 4 Airflow DAG tests, 46 dbt data tests |
+| Tests | 97 pytest tests (unit, Spark streaming, DuckDB, dashboard), 4 Airflow DAG tests, 46 dbt data tests |
 
 Wall-clock time-to-detect adds about 100 seconds to the statistics: the 1-minute window,
 the 1-minute watermark that waits for late events, and three 10-second trigger hops from Kafka

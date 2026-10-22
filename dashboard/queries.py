@@ -139,3 +139,82 @@ def alerts(settings: Settings) -> pd.DataFrame:
 
 def recall(settings: Settings, lot_id: str) -> recall_lookup.RecallResult:
     return recall_lookup.recall(lot_id, settings)
+
+
+STATION_STATUS_SQL = """
+WITH series AS (SELECT DISTINCT station_id, metric FROM {gold.spc_window_stats}),
+latest AS (
+    SELECT station_id, metric, max(window_start) AS last_ws
+    FROM {gold.spc_window_stats} WHERE z IS NOT NULL GROUP BY 1, 2
+),
+last_z AS (
+    SELECT w.station_id, w.metric, w.z, w.window_start
+    FROM {gold.spc_window_stats} w JOIN latest l USING (station_id, metric)
+    WHERE w.window_start = l.last_ws
+),
+recent AS (
+    SELECT a.station_id, a.metric, count(DISTINCT a.window_start) AS n
+    FROM {gold.spc_alerts} a JOIN latest l USING (station_id, metric)
+    WHERE a.window_start > l.last_ws - to_minutes(CAST(? AS BIGINT))
+    GROUP BY 1, 2
+)
+SELECT s.station_id, s.metric, z.z, z.window_start AS last_window, coalesce(r.n, 0) AS recent_alerts
+FROM series s
+LEFT JOIN last_z z USING (station_id, metric)
+LEFT JOIN recent r USING (station_id, metric)
+ORDER BY s.station_id, s.metric
+"""
+
+
+def station_status(settings: Settings, recent_windows: int = 2) -> pd.DataFrame:
+    """Latest z and the number of alerting windows among the last `recent_windows`, per series."""
+    if not (table_exists(settings, "gold", "spc_window_stats") and table_exists(settings, "gold", "spc_alerts")):
+        return pd.DataFrame(columns=["station_id", "metric", "z", "last_window", "recent_alerts"])
+    return query(STATION_STATUS_SQL, settings, [recent_windows])
+
+
+OVERVIEW_SQL = """
+SELECT count(*) AS cells_tested,
+       avg(CASE WHEN result = 'PASS' THEN 1.0 ELSE 0.0 END) AS first_pass_yield,
+       min(ts) AS first_event, max(ts) AS last_event,
+       split_part(arg_max(lot_id, ts), '-', 2) AS run_tag
+FROM {silver.cell_tests}
+"""
+
+
+def overview(settings: Settings) -> dict:
+    if not table_exists(settings, "silver", "cell_tests"):
+        return {}
+    row = query(OVERVIEW_SQL, settings).iloc[0].to_dict()
+    row["quarantined"] = (int(query("SELECT count(*) AS n FROM {silver.cell_tests_quarantine}", settings).n[0])
+                          if table_exists(settings, "silver", "cell_tests_quarantine") else 0)
+    return row
+
+
+STATION_FPY_SQL = """
+SELECT {bucket} station_id, any_value(line_id) AS line_id, count(*) AS cells_tested,
+       avg(CASE WHEN result = 'PASS' THEN 1.0 ELSE 0.0 END) AS first_pass_yield
+FROM {silver.cell_tests}
+GROUP BY ALL
+ORDER BY ALL
+"""
+
+
+def station_fpy(settings: Settings, bucket_minutes: int | None = None) -> pd.DataFrame:
+    """Live first-pass yield per station, optionally per time bucket (for the heatmap)."""
+    if not table_exists(settings, "silver", "cell_tests"):
+        return pd.DataFrame()
+    bucket = (f"time_bucket(to_minutes({int(bucket_minutes)}), ts) AS bucket," if bucket_minutes else "")
+    return query(STATION_FPY_SQL.replace("{bucket}", bucket), settings)
+
+
+def pack_summary(cells: pd.DataFrame) -> pd.DataFrame:
+    """Recalled cells grouped by pack: line, modules touched and cells from the lot."""
+    placed = cells[cells.pack_id.notna()]
+    if placed.empty:
+        return pd.DataFrame(columns=["pack_id", "line_id", "modules", "cells_from_lot"])
+    out = (placed.groupby("pack_id")
+           .agg(modules=("module_id", "nunique"), cells_from_lot=("cell_id", "count"))
+           .reset_index())
+    out.insert(1, "line_id", out.pack_id.str.split("-").str[2])
+    return out.sort_values("pack_id").reset_index(drop=True)

@@ -305,3 +305,26 @@ next node. With several threads that close can race a query still inside DuckDB'
 Reproduced locally: 3 crashes in 25 runs of `dbt test --threads 8`. With `keep_open: true` in
 `dbt/profiles.yml` (one connection for the whole run): 0 crashes in 50 runs, and `dbt build`
 and `dbt docs generate` still pass. The green CI run on the next commit had been luck.
+
+## Dashboard redesign
+
+### Lead with where to look
+The first version made you pick a station before showing anything. The page now opens on a KPI
+row and a plant status grid (12 stations by 3 metrics, each marked in control, watch or alert
+with a dot and a text label, never color alone). The station and metric pickers default to the
+worst series, so the first thing on screen is the problem.
+
+### A z-score panel under the control chart
+A 0.25 mOhm drift stretches the y-axis until the limits and the in-control windows collapse into
+one line. The second chart shows the same windows in sigma units with the 1, 2 and 3 sigma zones
+shaded, clipped at plus or minus 6; clipped points become edge triangles that keep the true z in
+the hover. Both charts share an explicit time range so their windows line up.
+
+### A capped heatmap for yield
+Failure rate by station and 5-minute bucket answers "where and when" in one view: the drifting
+station's row and the bad lot's column. The color scale saturates at 25%, because a linear scale
+to the drift's 99% left the bad lot's 13% one step above normal.
+
+### Emphasis, not a rainbow
+The station bars color the worst station in the accent and the rest in gray, since one station is
+the point and the others are context.

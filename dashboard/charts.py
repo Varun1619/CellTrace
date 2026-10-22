@@ -18,6 +18,11 @@ GRID = "#2c2c2a"
 BASELINE = "#383835"
 SERIES = ["#3987e5", "#d95926", "#199e70"]  # blue, orange, aqua: categorical slots 1-3, dark steps
 CRITICAL = "#d03b3b"
+CONTEXT = "#55544f"  # de-emphasized bars: one series is the point, the rest are context
+# Blue sequential ramp, dark steps first so low values recede into the dark surface.
+SEQUENTIAL = ["#0d366b", "#184f95", "#256abf", "#3987e5", "#6da7ec", "#9ec5f4", "#cde2fb"]
+Z_CLIP = 6.0
+FAILURE_CAP = 0.25  # heatmap color saturates here so a 13% bad lot still stands out next to a 99% drift
 FONT = 'system-ui, -apple-system, "Segoe UI", sans-serif'
 
 
@@ -38,6 +43,12 @@ def _layout(fig: go.Figure, title: str, y_title: str, height: int = 380) -> go.F
     fig.update_yaxes(title={"text": y_title, "font": {"color": MUTED}}, gridcolor=GRID, zeroline=False,
                      linecolor=BASELINE, tickfont={"color": MUTED})
     return fig
+
+
+def x_range(windows: pd.DataFrame) -> list:
+    """Shared time range for the stacked SPC charts, so their windows line up vertically."""
+    pad = pd.Timedelta(seconds=30)
+    return [windows.window_start.min() - pad, windows.window_start.max() + pad]
 
 
 def _band(fig: go.Figure, x, y, name: str, dash: str, width: float = 1, show: bool = True) -> None:
@@ -80,7 +91,9 @@ def control_chart(windows: pd.DataFrame, alerts: pd.DataFrame, metric_label: str
             marker={"symbol": "x", "size": 13, "color": CRITICAL, "line": {"color": SURFACE, "width": 1}},
             customdata=rules[["rules"]].to_numpy(), hovertemplate="alert %{customdata[0]}<extra></extra>",
         ))
-    return _layout(fig, f"{station}: {metric_label}", metric_label)
+    fig = _layout(fig, f"{station}: {metric_label}", metric_label)
+    fig.update_xaxes(range=x_range(windows))
+    return fig
 
 
 LABEL_GAP_PX = 13
@@ -118,13 +131,17 @@ def fpy_trend(df: pd.DataFrame, plot_height_px: float = 300) -> go.Figure:
 
 
 def fpy_by_station(df: pd.DataFrame) -> go.Figure:
+    """Horizontal bars, worst station in the accent color and the rest as gray context."""
+    df = df.sort_values("first_pass_yield", ascending=False)
+    worst = df.first_pass_yield.min()
+    colors = [SERIES[0] if v == worst else CONTEXT for v in df.first_pass_yield]
     fig = go.Figure(go.Bar(
-        x=df.first_pass_yield, y=df.station_id, orientation="h", marker={"color": SERIES[0], "cornerradius": 4},
+        x=df.first_pass_yield, y=df.station_id, orientation="h", marker={"color": colors, "cornerradius": 4},
         text=[f"{v:.1%}" for v in df.first_pass_yield], textposition="outside", textfont={"color": INK_SECONDARY},
         customdata=df[["cells_tested"]].to_numpy(),
         hovertemplate="%{y}: %{x:.2%} of %{customdata[0]} cells<extra></extra>",
     ))
-    fig = _layout(fig, "First-pass yield by station (dbt)", "", height=420)
+    fig = _layout(fig, "First-pass yield by station", "", height=420)
     low = max(0.0, float(df.first_pass_yield.min()) - 0.05)
     fig.update_xaxes(tickformat=".0%", range=[low, 1.0], showgrid=True, gridcolor=GRID)
     fig.update_layout(hovermode="closest", bargap=0.25)
@@ -146,4 +163,60 @@ def defect_pareto(df: pd.DataFrame) -> go.Figure:
     # Headroom so the share label on the longest bar is not clipped.
     fig.update_xaxes(showgrid=True, gridcolor=GRID, range=[0, float(ordered.failures.max()) * 1.18])
     fig.update_layout(hovermode="closest", bargap=0.3)
+    return fig
+
+
+def zscore_chart(windows: pd.DataFrame, alerts: pd.DataFrame) -> go.Figure:
+    """The same windows in sigma units with the 1, 2 and 3 sigma zones shaded.
+
+    Points beyond +/-Z_CLIP are pinned to the edge as triangles and keep their true z in the
+    hover, so one large drift cannot flatten the in-control detail.
+    """
+    fig = go.Figure()
+    scored = windows.dropna(subset=["z"]) if not windows.empty else windows
+    if scored.empty:
+        return _layout(fig, "Distance from the center line (sigma)", "z", height=230)
+    for k, opacity in ((3, 0.07), (2, 0.07), (1, 0.08)):
+        fig.add_hrect(y0=-k, y1=k, fillcolor=MUTED, opacity=opacity, line_width=0)
+    for y, dash in ((3, "dash"), (-3, "dash"), (0, "solid")):
+        fig.add_hline(y=y, line={"color": MUTED, "width": 1, "dash": dash})
+    shown = scored.z.clip(-Z_CLIP, Z_CLIP)
+    fig.add_trace(go.Scatter(
+        x=scored.window_start, y=shown, name="z-score", mode="lines+markers",
+        line={"color": SERIES[0], "width": 2}, marker={"size": 7, "color": SERIES[0]},
+        customdata=scored[["z"]].to_numpy(), hovertemplate="z %{customdata[0]:.2f}<extra></extra>",
+    ))
+    beyond = scored[scored.z.abs() > Z_CLIP]
+    if not beyond.empty:
+        fig.add_trace(go.Scatter(
+            x=beyond.window_start, y=beyond.z.clip(-Z_CLIP, Z_CLIP), name="Beyond the chart", mode="markers",
+            marker={"symbol": ["triangle-up" if z > 0 else "triangle-down" for z in beyond.z], "size": 11,
+                    "color": CRITICAL, "line": {"color": SURFACE, "width": 1}},
+            customdata=beyond[["z"]].to_numpy(), hovertemplate="z %{customdata[0]:.1f} (off scale)<extra></extra>",
+        ))
+    fig = _layout(fig, f"Distance from the center line (sigma), clipped at +/-{Z_CLIP:.0f}", "z", height=250)
+    fig.update_yaxes(range=[-Z_CLIP - 0.6, Z_CLIP + 0.6], tickvals=[-6, -3, 0, 3, 6])
+    fig.update_xaxes(range=x_range(windows))
+    return fig
+
+
+def fpy_heatmap(df: pd.DataFrame) -> go.Figure:
+    """Failure rate per station and 5-minute bucket: one hue, brighter means more failures."""
+    pivot = df.pivot_table(index="station_id", columns="bucket", values="first_pass_yield").sort_index()
+    cells = df.pivot_table(index="station_id", columns="bucket", values="cells_tested").reindex_like(pivot)
+    failure = (1 - pivot).round(4)
+    steps = [i / (len(SEQUENTIAL) - 1) for i in range(len(SEQUENTIAL))]
+    fig = go.Figure(go.Heatmap(
+        z=failure.to_numpy(), x=list(failure.columns), y=list(failure.index),
+        colorscale=[[st, c] for st, c in zip(steps, SEQUENTIAL)], zmin=0,
+        zmax=min(max(0.10, float(failure.max().max())), FAILURE_CAP), xgap=2, ygap=2,
+        customdata=cells.to_numpy(),
+        colorbar={"title": {"text": "Failure rate", "font": {"color": MUTED}},
+                  "tickvals": [0, 0.05, 0.10, 0.15, 0.20, 0.25], "ticktext": ["0%", "5%", "10%", "15%", "20%", "25%+"],
+                  "tickfont": {"color": MUTED}, "outlinewidth": 0, "thickness": 12},
+        hovertemplate="%{y} at %{x|%H:%M}<br>%{z:.1%} failed of %{customdata} cells<extra></extra>",
+    ))
+    fig = _layout(fig, "Failure rate by station, 5-minute buckets", "", height=420)
+    fig.update_layout(hovermode="closest")
+    fig.update_yaxes(autorange="reversed", gridcolor=SURFACE)
     return fig

@@ -68,3 +68,35 @@ def test_pareto_has_headroom_for_its_labels():
     df = pd.DataFrame({"failure_code": ["A", "B"], "failures": [100, 10], "share": [0.9, 0.1],
                        "cumulative_share": [0.9, 1.0]})
     assert charts.defect_pareto(df).layout.xaxis.range[1] > 100
+
+
+def test_zscore_chart_clips_at_six_sigma_and_keeps_true_z_in_hover():
+    w = windows(n=8, baseline=2)
+    w.loc[7, "z"] = 42.0
+    fig = charts.zscore_chart(w, pd.DataFrame(columns=["window_start", "rule_triggered"]))
+    z_trace = next(t for t in fig.data if t.name == "z-score")
+    assert max(z_trace.y) == charts.Z_CLIP
+    clipped = next(t for t in fig.data if t.name == "Beyond the chart")
+    assert list(clipped.customdata[:, 0]) == [42.0]
+    assert fig.layout.yaxis.range[1] >= charts.Z_CLIP
+
+
+def test_fpy_heatmap_puts_stations_on_rows_and_uses_one_hue():
+    rows = [{"bucket": T0 + timedelta(minutes=5 * i), "station_id": s, "cells_tested": 100,
+             "first_pass_yield": 0.97 - (0.3 if s == "L2-S3" and i == 2 else 0)}
+            for i in range(3) for s in ("L1-S1", "L2-S3")]
+    fig = charts.fpy_heatmap(pd.DataFrame(rows))
+    hm = fig.data[0]
+    assert hm.type == "heatmap" and list(hm.y) == ["L1-S1", "L2-S3"]
+    assert hm.z[1][2] == pytest.approx(0.33)  # failure rate, worst cell
+    assert len({c[1] for c in hm.colorscale}) == len(hm.colorscale)  # distinct steps of one ramp
+    assert hm.zmax == charts.FAILURE_CAP  # 33% saturates; hover keeps the true value
+
+
+def test_station_bars_emphasize_the_worst_station():
+    df = pd.DataFrame({"station_id": ["L1-S1", "L2-S3", "L3-S2"], "line_id": ["L1", "L2", "L3"],
+                       "cells_tested": [100, 100, 100], "first_pass_yield": [0.97, 0.71, 0.96]})
+    fig = charts.fpy_by_station(df)
+    colors = dict(zip(fig.data[0].y, fig.data[0].marker.color))
+    assert colors["L2-S3"] == charts.SERIES[0]
+    assert colors["L1-S1"] == colors["L3-S2"] == charts.CONTEXT
